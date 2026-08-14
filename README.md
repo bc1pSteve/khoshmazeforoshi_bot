@@ -1,0 +1,73 @@
+# Telegram + Bale Product Poster
+
+این پروژه یک محصول مشخص را با `product_id` از Google Sheets می‌خواند، تصویر آن را از Google Drive دریافت می‌کند و همان تصویر و محتوای کپشن را ابتدا در تلگرام و سپس در بله منتشر می‌کند.
+
+## جریان اجرا
+
+1. اجرای دستی GitHub Actions با یک `product_id`
+2. خواندن ردیف متناظر از شیت `telegram_bot`
+3. دانلود تصویر از Google Drive
+4. ساخت کپشن تلگرام با HTML و کپشن هم‌معنا برای بله با Markdown
+5. ارسال عکس و کپشن به تلگرام
+6. ثبت وضعیت میانی `telegram_posted` در شیت
+7. ارسال همان عکس و محتوای کپشن به بله
+8. ثبت وضعیت نهایی `posted` و زمان ارسال
+
+اگر ارسال تلگرام موفق شود ولی بله خطا بدهد، اجرای بعدی با دیدن `telegram_posted` ارسال تلگرام را تکرار نمی‌کند و فقط بله را دوباره امتحان می‌کند.
+
+## ساختار Google Sheet
+
+نام تب باید `telegram_bot` باشد و ردیف اول هدر در نظر گرفته می‌شود.
+
+| ستون | نام | کاربرد |
+|---|---|---|
+| A | `product_id` | شناسهٔ دستی محصول |
+| B | `drive_file_id` | شناسه یا لینک کامل تصویر در Google Drive |
+| C | `caption` | متن اصلی کپشن |
+| D | `title` | عنوان محصول |
+| E | `link` | لینک محصول |
+| F | `status` | خالی، `telegram_posted` یا `posted` |
+| G | `posted_at` | زمان UTC تکمیل ارسال به هر دو پلتفرم |
+
+Service Account باید روی شیت دسترسی Editor و روی فایل یا پوشهٔ تصاویر Drive دسترسی Viewer داشته باشد.
+
+## Secrets موردنیاز در GitHub Actions
+
+در ریپوی خصوصی به مسیر **Settings → Secrets and variables → Actions** بروید و این Secrets را بسازید:
+
+| Secret | کاربرد |
+|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | محتوای کامل JSON سرویس‌اکانت |
+| `SPREADSHEET_ID` | شناسهٔ فایل Google Sheet |
+| `TELEGRAM_BOT_TOKEN` | توکن ربات تلگرام |
+| `TELEGRAM_CHANNEL_ID` | شناسه یا نام کاربری کانال تلگرام |
+| `TELEGRAM_ADMIN_CHAT_ID` | مقصد هشدار خطا در تلگرام؛ اختیاری |
+| `BALE_BOT_TOKEN` | توکن بازوی بله |
+| `BALE_CHANNEL_ID` | شناسه یا نام کاربری کانال بله |
+
+توکن‌ها و فایل `service_account.json` را داخل کد، `.env.example` یا Commit قرار ندهید.
+
+ربات تلگرام و بازوی بله باید در کانال‌های مقصد اجازهٔ ارسال پیام داشته باشند.
+
+## اجرای دستی
+
+از تب Actions، گردش‌کار **Post to Telegram and Bale** را باز کنید، **Run workflow** را بزنید و `product_id` را وارد کنید.
+
+برای اجرای محلی:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# متغیرها را به روش امن بارگذاری کنید و service_account.json را کنار main.py بگذارید.
+python main.py P001
+```
+
+## تست بدون ارسال واقعی
+
+```bash
+python -m unittest discover -v
+```
+
+تست‌ها درخواست HTTP را Mock می‌کنند و هیچ پیامی به تلگرام یا بله ارسال نمی‌شود.
