@@ -21,7 +21,7 @@ from src.config import (
     GOOGLE_SERVICE_ACCOUNT_FILE,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHANNEL_ID,
-    TELEGRAM_ADMIN_CHAT_ID,
+    TELEGRAM_NOTIFICATION_CHAT_ID,
     BALE_BOT_TOKEN,
     BALE_CHANNEL_ID,
 )
@@ -75,6 +75,13 @@ def run() -> None:
     sheets.mark_as_posted(row["row_number"])
 
     print(f"Row {row['row_number']} posted to Telegram and Bale, then marked as done.")
+    if TELEGRAM_NOTIFICATION_CHAT_ID:
+        notification_client = TelegramClient(
+            TELEGRAM_BOT_TOKEN, TELEGRAM_NOTIFICATION_CHAT_ID
+        )
+        notification_client.send_message(
+            f"✅ محصول {product_id} با موفقیت به تلگرام و بله ارسال شد."
+        )
 
 
 if __name__ == "__main__":
@@ -86,8 +93,11 @@ if __name__ == "__main__":
         traceback.print_exc()
         try:
             # Best-effort failure alert; don't let this crash mask the real error.
-            admin_client = TelegramClient(TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_CHAT_ID)
-            admin_client.send_message(error_text)
+            if TELEGRAM_NOTIFICATION_CHAT_ID:
+                admin_client = TelegramClient(
+                    TELEGRAM_BOT_TOKEN, TELEGRAM_NOTIFICATION_CHAT_ID
+                )
+                admin_client.send_message(error_text)
         except Exception:  # noqa: BLE001
             pass
         sys.exit(1)

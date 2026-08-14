@@ -53,6 +53,10 @@ Service Account باید روی شیت دسترسی Editor و روی فایل ی
 
 از تب Actions، گردش‌کار **Post to Telegram and Bale** را باز کنید، **Run workflow** را بزنید و `product_id` را وارد کنید.
 
+## اجرای تعاملی از تلگرام
+
+پوشهٔ `worker/` یک کنترل‌کنندهٔ Cloudflare Worker دارد که فرمان `/post PRODUCT_ID` را فقط از شناسهٔ عددی ادمین می‌پذیرد، دکمهٔ تأیید نشان می‌دهد و همین Workflow را اجرا می‌کند. نتیجهٔ نهایی در همان چت خصوصی اعلام می‌شود. راه‌اندازی و Secrets لازم در `worker/README.md` توضیح داده شده‌اند.
+
 برای اجرای محلی:
 
 ```bash

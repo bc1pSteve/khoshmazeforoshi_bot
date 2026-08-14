@@ -6,6 +6,9 @@ on:
       product_id:
         description: "Product ID to post (required)"
         required: true
+      request_chat_id:
+        description: "Telegram request chat ID (leave blank for manual runs)"
+        required: false
 
 jobs:
   post:
@@ -32,6 +35,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          TELEGRAM_REQUEST_CHAT_ID: ${{ github.event.inputs.request_chat_id }}
           BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
           BALE_CHANNEL_ID: ${{ secrets.BALE_CHANNEL_ID }}
           PRODUCT_ID: ${{ github.event.inputs.product_id }}

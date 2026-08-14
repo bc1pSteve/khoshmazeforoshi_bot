@@ -20,6 +20,8 @@ TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
 BALE_BOT_TOKEN = os.environ["BALE_BOT_TOKEN"]
 BALE_CHANNEL_ID = os.environ["BALE_CHANNEL_ID"]
 
-# Optional: a separate private chat/channel ID to receive error alerts.
-# Falls back to the main channel if not set.
-TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", TELEGRAM_CHANNEL_ID)
+# Optional private destinations for completion and error notifications.
+# TELEGRAM_REQUEST_CHAT_ID is supplied by the interactive Telegram controller.
+TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "").strip()
+TELEGRAM_REQUEST_CHAT_ID = os.environ.get("TELEGRAM_REQUEST_CHAT_ID", "").strip()
+TELEGRAM_NOTIFICATION_CHAT_ID = TELEGRAM_REQUEST_CHAT_ID or TELEGRAM_ADMIN_CHAT_ID
