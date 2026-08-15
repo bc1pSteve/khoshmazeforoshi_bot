@@ -82,6 +82,35 @@ function mainMenu() {
   };
 }
 
+async function sendMainMenuMessage(chatId, text, env, fetchImpl) {
+  const sentMessage = await telegram(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      text,
+      reply_markup: { remove_keyboard: true },
+    },
+    env,
+    fetchImpl,
+  );
+
+  const messageId = sentMessage?.result?.message_id;
+  if (!messageId) {
+    throw new Error("Telegram sendMessage did not return a message ID");
+  }
+
+  await telegram(
+    "editMessageReplyMarkup",
+    {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: mainMenu(),
+    },
+    env,
+    fetchImpl,
+  );
+}
+
 function forceReply(placeholder) {
   return {
     force_reply: true,
@@ -260,13 +289,9 @@ async function sendOrderStatus(chatId, orderId, phone, env, fetchImpl) {
       event: "woocommerce_order_lookup_failed",
       error: error instanceof Error ? error.message : String(error),
     }));
-    await telegram(
-      "sendMessage",
-      {
-        chat_id: chatId,
-        text: "سرویس پیگیری سفارش موقتاً در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید.",
-        reply_markup: mainMenu(),
-      },
+    await sendMainMenuMessage(
+      chatId,
+      "سرویس پیگیری سفارش موقتاً در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید.",
       env,
       fetchImpl,
     );
@@ -275,24 +300,15 @@ async function sendOrderStatus(chatId, orderId, phone, env, fetchImpl) {
 
   const billingPhone = normalizeIranianMobile(order?.billing?.phone);
   if (!order || !billingPhone || !await safeEqual(phone, billingPhone)) {
-    await telegram(
-      "sendMessage",
-      { chat_id: chatId, text: ORDER_NOT_FOUND_TEXT, reply_markup: mainMenu() },
-      env,
-      fetchImpl,
-    );
+    await sendMainMenuMessage(chatId, ORDER_NOT_FOUND_TEXT, env, fetchImpl);
     return;
   }
 
   const status = ORDER_STATUS_LABELS[String(order.status).replace(/^wc-/, "")]
     || "در حال بررسی";
-  await telegram(
-    "sendMessage",
-    {
-      chat_id: chatId,
-      text: `وضعیت سفارش #${orderId}: ${status}`,
-      reply_markup: mainMenu(),
-    },
+  await sendMainMenuMessage(
+    chatId,
+    `وضعیت سفارش #${orderId}: ${status}`,
     env,
     fetchImpl,
   );
@@ -320,16 +336,7 @@ async function handleMessage(message, env, fetchImpl) {
         "/last — وضعیت آخرین اجرا",
       );
     }
-    await telegram(
-      "sendMessage",
-      {
-        chat_id: chatId,
-        text: lines.join("\n"),
-        reply_markup: mainMenu(),
-      },
-      env,
-      fetchImpl,
-    );
+    await sendMainMenuMessage(chatId, lines.join("\n"), env, fetchImpl);
     return;
   }
 
@@ -401,13 +408,9 @@ async function handleMessage(message, env, fetchImpl) {
     return;
   }
 
-  await telegram(
-    "sendMessage",
-    {
-      chat_id: chatId,
-      text: "برای پیگیری سفارش، دکمه زیر را بزنید.",
-      reply_markup: mainMenu(),
-    },
+  await sendMainMenuMessage(
+    chatId,
+    "برای پیگیری سفارش، دکمه زیر را بزنید.",
     env,
     fetchImpl,
   );
