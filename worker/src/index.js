@@ -1,13 +1,21 @@
 const TELEGRAM_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
 
-function safeEqual(left, right) {
+async function safeEqual(left, right) {
   const a = String(left || "");
   const b = String(right || "");
-  if (!a || a.length !== b.length) return false;
+  if (!a || !b) return false;
 
+  const encoder = new TextEncoder();
+  const [aHash, bHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(a)),
+    crypto.subtle.digest("SHA-256", encoder.encode(b)),
+  ]);
+
+  const aBytes = new Uint8Array(aHash);
+  const bBytes = new Uint8Array(bHash);
   let difference = 0;
-  for (let index = 0; index < a.length; index += 1) {
-    difference |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  for (let index = 0; index < aBytes.length; index += 1) {
+    difference |= aBytes[index] ^ bBytes[index];
   }
   return difference === 0;
 }
@@ -211,7 +219,10 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
     return new Response("Method not allowed", { status: 405 });
   }
 
-  if (!safeEqual(request.headers.get(TELEGRAM_SECRET_HEADER), env.TELEGRAM_WEBHOOK_SECRET)) {
+  if (!await safeEqual(
+    request.headers.get(TELEGRAM_SECRET_HEADER),
+    env.TELEGRAM_WEBHOOK_SECRET,
+  )) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -225,11 +236,18 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
   try {
     await handleUpdate(update, env, fetchImpl);
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(JSON.stringify({
+      event: "telegram_update_failed",
+      update_id: update?.update_id ?? null,
+      error: message,
+    }));
+
     const adminId = env.TELEGRAM_ADMIN_USER_ID;
     if (adminId) {
       await telegram(
         "sendMessage",
-        { chat_id: adminId, text: `❌ خطای کنترل‌کننده: ${error.message}` },
+        { chat_id: adminId, text: `❌ خطای کنترل‌کننده: ${message}` },
         env,
         fetchImpl,
       ).catch(() => {});

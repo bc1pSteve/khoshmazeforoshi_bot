@@ -44,6 +44,18 @@ test("rejects a webhook with the wrong secret", async () => {
   assert.equal(calls, 0);
 });
 
+test("rejects a webhook when the configured secret is missing", async () => {
+  let calls = 0;
+  const response = await handleRequest(
+    webhookRequest({}, ""),
+    { ...env, TELEGRAM_WEBHOOK_SECRET: "" },
+    async () => { calls += 1; },
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal(calls, 0);
+});
+
 test("ignores commands from non-admin users", async () => {
   let calls = 0;
   const response = await handleRequest(
@@ -91,7 +103,7 @@ test("confirmed callback dispatches GitHub workflow with product and chat IDs", 
   const calls = [];
   const fetchMock = async (url, options = {}) => {
     calls.push({ url, options });
-    if (url.includes("api.github.com")) return new Response("", { status: 204 });
+    if (url.includes("api.github.com")) return new Response(null, { status: 204 });
     return jsonResponse({ ok: true, result: {} });
   };
 
@@ -113,4 +125,6 @@ test("confirmed callback dispatches GitHub workflow with product and chat IDs", 
   assert.ok(githubCall);
   const body = JSON.parse(githubCall.options.body);
   assert.deepEqual(body.inputs, { product_id: "P001", request_chat_id: "42" });
+  const editedMessage = calls.find((call) => call.url.includes("/editMessageText"));
+  assert.ok(editedMessage);
 });

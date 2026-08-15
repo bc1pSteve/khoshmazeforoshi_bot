@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "khoshmazeforoshi-telegram-controller",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "GITHUB_OWNER": "bc1pSteve",
+    "GITHUB_REPO": "khoshmazeforoshi_bot",
+    "GITHUB_WORKFLOW": "post.yml",
+    "GITHUB_REF": "main"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
+  }
+}

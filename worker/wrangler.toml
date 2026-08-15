@@ -1,9 +1,0 @@
-name = "khoshmazeforoshi-telegram-controller"
-main = "src/index.js"
-compatibility_date = "2026-08-15"
-
-[vars]
-GITHUB_OWNER = "bc1pSteve"
-GITHUB_REPO = "khoshmazeforoshi_bot"
-GITHUB_WORKFLOW = "post.yml"
-GITHUB_REF = "main"
