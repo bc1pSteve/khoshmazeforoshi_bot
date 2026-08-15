@@ -1,7 +1,10 @@
 const TELEGRAM_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
+const BALE_WEBHOOK_PATH_PREFIX = "/bale/";
+const BALE_SESSION_TTL_SECONDS = 15 * 60;
 const ORDER_BUTTON_TEXT = "📦 پیگیری سفارش";
 const SUPPORT_BUTTON_TEXT = "💬 ارتباط با ادمین";
-const SUPPORT_URL = "https://t.me/khoshmazeforoshi_supp";
+const TELEGRAM_SUPPORT_URL = "https://t.me/khoshmazeforoshi_supp";
+const BALE_SUPPORT_URL = "https://ble.ir/khoshmazeforoshi_supp";
 const ORDER_ID_PROMPT = "لطفا شماره سفارش خود را وارد کنید";
 const INVALID_ORDER_ID_TEXT = "شماره سفارش وارد شده اشتباه است";
 const ORDER_PHONE_PROMPT = "شماره موبایلی که با آن سفارش را ثبت کردید وارد کنید.";
@@ -77,7 +80,16 @@ function mainMenu() {
   return {
     inline_keyboard: [[
       { text: ORDER_BUTTON_TEXT, callback_data: "order" },
-      { text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL },
+      { text: SUPPORT_BUTTON_TEXT, url: TELEGRAM_SUPPORT_URL },
+    ]],
+  };
+}
+
+function baleMainMenu() {
+  return {
+    inline_keyboard: [[
+      { text: ORDER_BUTTON_TEXT, callback_data: "order" },
+      { text: SUPPORT_BUTTON_TEXT, url: BALE_SUPPORT_URL },
     ]],
   };
 }
@@ -144,6 +156,77 @@ async function telegram(method, payload, env, fetchImpl) {
     throw new Error(result.description || `Telegram API returned ${response.status}`);
   }
   return result;
+}
+
+async function bale(method, payload, env, fetchImpl) {
+  if (!env.BALE_BOT_TOKEN) {
+    throw new Error("Bale bot token is not configured");
+  }
+
+  const response = await fetchImpl(
+    `https://tapi.bale.ai/bot${env.BALE_BOT_TOKEN}/${method}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.description || `Bale API returned ${response.status}`);
+  }
+  return result;
+}
+
+function baleSessionKeys(chatId) {
+  return {
+    order: `bale:awaiting_order:${chatId}`,
+    phone: `bale:awaiting_phone:${chatId}`,
+  };
+}
+
+function baleSessions(env) {
+  if (!env.ORDER_SESSIONS) {
+    throw new Error("ORDER_SESSIONS KV binding is not configured");
+  }
+  return env.ORDER_SESSIONS;
+}
+
+async function clearBaleSession(chatId, env) {
+  const keys = baleSessionKeys(chatId);
+  const sessions = baleSessions(env);
+  await Promise.all([
+    sessions.delete(keys.order),
+    sessions.delete(keys.phone),
+  ]);
+}
+
+async function setBaleOrderStep(chatId, env) {
+  const keys = baleSessionKeys(chatId);
+  const sessions = baleSessions(env);
+  await sessions.put(keys.order, "1", { expirationTtl: BALE_SESSION_TTL_SECONDS });
+  await sessions.delete(keys.phone);
+}
+
+async function setBalePhoneStep(chatId, orderId, env) {
+  const keys = baleSessionKeys(chatId);
+  const sessions = baleSessions(env);
+  await sessions.put(keys.phone, orderId, { expirationTtl: BALE_SESSION_TTL_SECONDS });
+  await sessions.delete(keys.order);
+}
+
+async function sendBaleMainMenuMessage(chatId, text, env, fetchImpl) {
+  await bale(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      text,
+      reply_markup: baleMainMenu(),
+    },
+    env,
+    fetchImpl,
+  );
 }
 
 async function dispatchWorkflow(productId, chatId, env, fetchImpl) {
@@ -324,6 +407,134 @@ async function sendOrderStatus(chatId, orderId, phone, env, fetchImpl) {
   );
 }
 
+async function sendBaleOrderStatus(chatId, orderId, phone, env, fetchImpl) {
+  let order;
+  try {
+    order = await getWooCommerceOrder(orderId, env, fetchImpl);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "woocommerce_order_lookup_failed",
+      platform: "bale",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    await sendBaleMainMenuMessage(
+      chatId,
+      "سرویس پیگیری سفارش موقتاً در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید.",
+      env,
+      fetchImpl,
+    );
+    return;
+  }
+
+  const billingPhone = normalizeIranianMobile(order?.billing?.phone);
+  if (!order || !billingPhone || !await safeEqual(phone, billingPhone)) {
+    await sendBaleMainMenuMessage(chatId, ORDER_NOT_FOUND_TEXT, env, fetchImpl);
+    return;
+  }
+
+  const status = ORDER_STATUS_LABELS[String(order.status).replace(/^wc-/, "")]
+    || "در حال بررسی";
+  await sendBaleMainMenuMessage(
+    chatId,
+    `وضعیت سفارش #${orderId}: ${status}`,
+    env,
+    fetchImpl,
+  );
+}
+
+async function handleBaleMessage(message, env, fetchImpl) {
+  if (message.chat?.type !== "private") return;
+
+  const chatId = message.chat.id;
+  const text = String(message.text || "").trim();
+  const command = (text.split(/\s+/, 1)[0] || "").split("@")[0].toLowerCase();
+  const keys = baleSessionKeys(chatId);
+  const sessions = baleSessions(env);
+
+  if (command === "/start" || command === "/help") {
+    await clearBaleSession(chatId, env);
+    await sendBaleMainMenuMessage(
+      chatId,
+      [
+        "سلام. به ربات خوشمزه فروشی خوش آمدید.",
+        "چه کمکی میتونم بهتون بکنم؟",
+      ].join("\n"),
+      env,
+      fetchImpl,
+    );
+    return;
+  }
+
+  if (text === ORDER_BUTTON_TEXT || command === "/order") {
+    await setBaleOrderStep(chatId, env);
+    await bale("sendMessage", { chat_id: chatId, text: ORDER_ID_PROMPT }, env, fetchImpl);
+    return;
+  }
+
+  const pendingOrderId = await sessions.get(keys.phone);
+  if (pendingOrderId) {
+    const phone = normalizeIranianMobile(text);
+    if (!phone) {
+      await bale(
+        "sendMessage",
+        { chat_id: chatId, text: INVALID_ORDER_PHONE_TEXT },
+        env,
+        fetchImpl,
+      );
+      return;
+    }
+
+    await sessions.delete(keys.phone);
+    await sendBaleOrderStatus(chatId, pendingOrderId, phone, env, fetchImpl);
+    return;
+  }
+
+  if (await sessions.get(keys.order)) {
+    const orderId = normalizeOrderId(text);
+    if (!orderId) {
+      await bale(
+        "sendMessage",
+        { chat_id: chatId, text: INVALID_ORDER_ID_TEXT },
+        env,
+        fetchImpl,
+      );
+      return;
+    }
+
+    await setBalePhoneStep(chatId, orderId, env);
+    await bale("sendMessage", { chat_id: chatId, text: ORDER_PHONE_PROMPT }, env, fetchImpl);
+    return;
+  }
+
+  await sendBaleMainMenuMessage(
+    chatId,
+    "برای پیگیری سفارش، دکمه زیر را بزنید.",
+    env,
+    fetchImpl,
+  );
+}
+
+async function handleBaleCallback(query, env, fetchImpl) {
+  const chatId = query.message?.chat?.id;
+  if (query.data !== "order" || query.message?.chat?.type !== "private" || !chatId) {
+    return;
+  }
+
+  await bale(
+    "answerCallbackQuery",
+    { callback_query_id: query.id },
+    env,
+    fetchImpl,
+  );
+  await setBaleOrderStep(chatId, env);
+  await bale("sendMessage", { chat_id: chatId, text: ORDER_ID_PROMPT }, env, fetchImpl);
+}
+
+async function handleBaleUpdate(update, env, fetchImpl) {
+  if (update.message) return handleBaleMessage(update.message, env, fetchImpl);
+  if (update.callback_query) return handleBaleCallback(update.callback_query, env, fetchImpl);
+}
+
 async function handleMessage(message, env, fetchImpl) {
   if (message.chat?.type !== "private") return;
 
@@ -485,10 +696,40 @@ async function handleUpdate(update, env, fetchImpl) {
 
 export async function handleRequest(request, env, fetchImpl = globalThis.fetch) {
   if (request.method === "GET") {
-    return new Response("Telegram controller is running", { status: 200 });
+    return new Response("Telegram and Bale controller is running", { status: 200 });
   }
   if (request.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  const pathname = new URL(request.url).pathname;
+  if (pathname.startsWith(BALE_WEBHOOK_PATH_PREFIX)) {
+    const webhookSecret = pathname.slice(BALE_WEBHOOK_PATH_PREFIX.length);
+    if (webhookSecret.includes("/") || !await safeEqual(
+      webhookSecret,
+      env.BALE_WEBHOOK_SECRET,
+    )) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    let update;
+    try {
+      update = await request.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+
+    try {
+      await handleBaleUpdate(update, env, fetchImpl);
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "bale_update_failed",
+        update_id: update?.update_id ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+
+    return new Response("ok", { status: 200 });
   }
 
   if (!await safeEqual(
