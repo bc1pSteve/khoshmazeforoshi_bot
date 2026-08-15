@@ -1,0 +1,36 @@
+name: Configure Telegram Webhook
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/setup-telegram-webhook.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Register Cloudflare Worker webhook with Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          WORKER_URL: https://khoshmazeforoshi-bot.mahbodakhzami98.workers.dev
+        run: |
+          test -n "$TELEGRAM_BOT_TOKEN"
+          test -n "$TELEGRAM_WEBHOOK_SECRET"
+
+          response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+            --form "url=${WORKER_URL}" \
+            --form "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
+            --form 'allowed_updates=["message","callback_query"]' \
+            --form "drop_pending_updates=true")"
+
+          echo "$response" | jq --exit-status '.ok == true'
