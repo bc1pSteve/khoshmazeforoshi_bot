@@ -1,4 +1,19 @@
 const TELEGRAM_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
+const ORDER_BUTTON_TEXT = "📦 پیگیری وضعیت سفارش";
+const ORDER_ID_PROMPT = "لطفاً شماره سفارش را وارد کنید.";
+const ORDER_PHONE_PROMPT_PREFIX = "شماره موبایلی که سفارش #";
+const ORDER_NOT_FOUND_TEXT = "سفارش پیدا نشد یا شماره موبایل با سفارش مطابقت ندارد.";
+
+const ORDER_STATUS_LABELS = {
+  pending: "در انتظار پرداخت",
+  processing: "در حال پردازش",
+  "on-hold": "در انتظار بررسی",
+  completed: "تکمیل شده",
+  cancelled: "لغو شده",
+  refunded: "بازپرداخت شده",
+  failed: "ناموفق",
+  "checkout-draft": "ثبت موقت",
+};
 
 async function safeEqual(left, right) {
   const a = String(left || "");
@@ -28,6 +43,43 @@ function validProductId(value) {
   if (!value || value.includes(":")) return false;
   const bytes = new TextEncoder().encode(value);
   return !/\s/.test(value) && bytes.length <= 48;
+}
+
+function toEnglishDigits(value) {
+  return String(value || "")
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
+}
+
+function normalizeOrderId(value) {
+  const normalized = toEnglishDigits(value).trim();
+  if (!/^\d{1,12}$/.test(normalized)) return null;
+  return normalized.replace(/^0+(?=\d)/, "");
+}
+
+function normalizeIranianMobile(value) {
+  let digits = toEnglishDigits(value).replace(/\D/g, "");
+  if (digits.startsWith("0098")) digits = digits.slice(4);
+  else if (digits.startsWith("98")) digits = digits.slice(2);
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  return /^9\d{9}$/.test(digits) ? digits : null;
+}
+
+function mainMenu() {
+  return {
+    keyboard: [[{ text: ORDER_BUTTON_TEXT }]],
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: "یکی از گزینه‌ها را انتخاب کنید",
+  };
+}
+
+function forceReply(placeholder) {
+  return {
+    force_reply: true,
+    selective: true,
+    input_field_placeholder: placeholder,
+  };
 }
 
 async function telegram(method, payload, env, fetchImpl) {
@@ -93,25 +145,108 @@ async function getLastRun(env, fetchImpl) {
   return payload.workflow_runs?.[0] || null;
 }
 
-async function handleMessage(message, env, fetchImpl) {
-  if (!isAdmin(message.from?.id, env) || message.chat?.type !== "private") return;
+function wooCommerceUrl(orderId, env) {
+  const baseUrl = new URL(String(env.WOOCOMMERCE_BASE_URL || ""));
+  if (baseUrl.protocol !== "https:") {
+    throw new Error("WooCommerce base URL must use HTTPS");
+  }
+  baseUrl.username = "";
+  baseUrl.password = "";
+  baseUrl.search = "";
+  baseUrl.hash = "";
+  baseUrl.pathname = `${baseUrl.pathname.replace(/\/$/, "")}/wp-json/wc/v3/orders/${orderId}`;
+  baseUrl.searchParams.set("_fields", "id,status,billing");
+  return baseUrl.toString();
+}
 
-  const chatId = message.chat.id;
-  const pieces = String(message.text || "").trim().split(/\s+/);
-  const command = (pieces.shift() || "").split("@")[0].toLowerCase();
+async function getWooCommerceOrder(orderId, env, fetchImpl) {
+  if (!env.WOOCOMMERCE_CONSUMER_KEY || !env.WOOCOMMERCE_CONSUMER_SECRET) {
+    throw new Error("WooCommerce credentials are not configured");
+  }
 
-  if (command === "/start" || command === "/help") {
+  const credentials = btoa(
+    `${env.WOOCOMMERCE_CONSUMER_KEY}:${env.WOOCOMMERCE_CONSUMER_SECRET}`,
+  );
+  const response = await fetchImpl(wooCommerceUrl(orderId, env), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Basic ${credentials}`,
+    },
+    redirect: "error",
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`WooCommerce request failed (${response.status})`);
+  }
+
+  const payload = await response.json();
+  if (!payload || String(payload.id) !== orderId || typeof payload.status !== "string") {
+    throw new Error("WooCommerce returned an invalid order response");
+  }
+  return payload;
+}
+
+function phonePrompt(orderId) {
+  return [
+    `${ORDER_PHONE_PROMPT_PREFIX}${orderId} با آن ثبت شده است را وارد کنید.`,
+    "توجه: ممکن است این شماره با شماره شخصی شما متفاوت باشد.",
+    "مثال: 09123456789",
+  ].join("\n");
+}
+
+function orderIdFromPhonePrompt(text) {
+  const prompt = String(text || "");
+  if (!prompt.includes(ORDER_PHONE_PROMPT_PREFIX)) return null;
+  return normalizeOrderId(prompt.match(/#(\d{1,12})/)?.[1]);
+}
+
+async function requestOrderId(chatId, env, fetchImpl, invalid = false) {
+  await telegram(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      text: invalid
+        ? `شماره سفارش معتبر نیست.\n\n${ORDER_ID_PROMPT}`
+        : `${ORDER_ID_PROMPT}\nمثال: 12345`,
+      reply_markup: forceReply("مثال: 12345"),
+    },
+    env,
+    fetchImpl,
+  );
+}
+
+async function requestOrderPhone(chatId, orderId, env, fetchImpl, invalid = false) {
+  await telegram(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      text: invalid
+        ? `شماره موبایل معتبر نیست.\n\n${phonePrompt(orderId)}`
+        : phonePrompt(orderId),
+      reply_markup: forceReply("شماره موبایل ثبت‌شده در سفارش"),
+    },
+    env,
+    fetchImpl,
+  );
+}
+
+async function sendOrderStatus(chatId, orderId, phone, env, fetchImpl) {
+  let order;
+  try {
+    order = await getWooCommerceOrder(orderId, env, fetchImpl);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "woocommerce_order_lookup_failed",
+      error: error instanceof Error ? error.message : String(error),
+    }));
     await telegram(
       "sendMessage",
       {
         chat_id: chatId,
-        text: [
-          "فرمان‌های مدیریت ارسال:",
-          "",
-          "/post PRODUCT_ID — آماده‌سازی ارسال محصول",
-          "/last — وضعیت آخرین اجرا",
-          "/help — نمایش راهنما",
-        ].join("\n"),
+        text: "سرویس پیگیری سفارش موقتاً در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید.",
+        reply_markup: mainMenu(),
       },
       env,
       fetchImpl,
@@ -119,7 +254,96 @@ async function handleMessage(message, env, fetchImpl) {
     return;
   }
 
+  const billingPhone = normalizeIranianMobile(order?.billing?.phone);
+  if (!order || !billingPhone || !await safeEqual(phone, billingPhone)) {
+    await telegram(
+      "sendMessage",
+      { chat_id: chatId, text: ORDER_NOT_FOUND_TEXT, reply_markup: mainMenu() },
+      env,
+      fetchImpl,
+    );
+    return;
+  }
+
+  const status = ORDER_STATUS_LABELS[String(order.status).replace(/^wc-/, "")]
+    || "در حال بررسی";
+  await telegram(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      text: `وضعیت سفارش #${orderId}: ${status}`,
+      reply_markup: mainMenu(),
+    },
+    env,
+    fetchImpl,
+  );
+}
+
+async function handleMessage(message, env, fetchImpl) {
+  if (message.chat?.type !== "private") return;
+
+  const chatId = message.chat.id;
+  const text = String(message.text || "").trim();
+  const pieces = text.split(/\s+/);
+  const command = (pieces.shift() || "").split("@")[0].toLowerCase();
+  const admin = isAdmin(message.from?.id, env);
+
+  if (command === "/start" || command === "/help") {
+    const lines = [
+      "سلام! برای مشاهده وضعیت سفارشتان، دکمه زیر را بزنید.",
+      "",
+      "اطلاعات سفارش فقط پس از تطبیق شماره موبایل ثبت‌شده در سفارش نمایش داده می‌شود.",
+    ];
+    if (admin) {
+      lines.push(
+        "",
+        "فرمان‌های مدیریت:",
+        "/post PRODUCT_ID — آماده‌سازی ارسال محصول",
+        "/last — وضعیت آخرین اجرا",
+      );
+    }
+    await telegram(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text: lines.join("\n"),
+        reply_markup: mainMenu(),
+      },
+      env,
+      fetchImpl,
+    );
+    return;
+  }
+
+  if (text === ORDER_BUTTON_TEXT || command === "/order") {
+    await requestOrderId(chatId, env, fetchImpl);
+    return;
+  }
+
+  const repliedTo = String(message.reply_to_message?.text || "");
+  if (repliedTo.includes(ORDER_ID_PROMPT)) {
+    const orderId = normalizeOrderId(text);
+    if (!orderId) {
+      await requestOrderId(chatId, env, fetchImpl, true);
+      return;
+    }
+    await requestOrderPhone(chatId, orderId, env, fetchImpl);
+    return;
+  }
+
+  const orderId = orderIdFromPhonePrompt(repliedTo);
+  if (orderId) {
+    const phone = normalizeIranianMobile(text);
+    if (!phone) {
+      await requestOrderPhone(chatId, orderId, env, fetchImpl, true);
+      return;
+    }
+    await sendOrderStatus(chatId, orderId, phone, env, fetchImpl);
+    return;
+  }
+
   if (command === "/post") {
+    if (!admin) return;
     const productId = pieces[0];
     if (!validProductId(productId)) {
       await telegram(
@@ -150,6 +374,7 @@ async function handleMessage(message, env, fetchImpl) {
   }
 
   if (command === "/last") {
+    if (!admin) return;
     const run = await getLastRun(env, fetchImpl);
     const text = run
       ? `آخرین اجرا: ${run.status}${run.conclusion ? ` / ${run.conclusion}` : ""}\n${run.html_url}`
@@ -160,7 +385,11 @@ async function handleMessage(message, env, fetchImpl) {
 
   await telegram(
     "sendMessage",
-    { chat_id: chatId, text: "فرمان شناخته نشد. /help را بفرست." },
+    {
+      chat_id: chatId,
+      text: "برای پیگیری سفارش، دکمه زیر را بزنید.",
+      reply_markup: mainMenu(),
+    },
     env,
     fetchImpl,
   );
