@@ -1,0 +1,28 @@
+name: Configure Bale Webhook
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Register Cloudflare Worker webhook with Bale
+        env:
+          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
+          BALE_WEBHOOK_SECRET: ${{ secrets.BALE_WEBHOOK_SECRET }}
+          WORKER_URL: https://khoshmazeforoshi-bot.mahbodakhzami98.workers.dev
+        run: |
+          test -n "$BALE_BOT_TOKEN"
+          test -n "$BALE_WEBHOOK_SECRET"
+
+          response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            "https://tapi.bale.ai/bot${BALE_BOT_TOKEN}/setWebhook" \
+            --form "url=${WORKER_URL}/bale/${BALE_WEBHOOK_SECRET}")"
+
+          echo "$response" | jq --exit-status '.ok == true'
