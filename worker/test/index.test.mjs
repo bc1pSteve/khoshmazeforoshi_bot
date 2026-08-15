@@ -3,6 +3,13 @@ import test from "node:test";
 
 import { handleRequest } from "../src/index.js";
 
+const ORDER_ID_PROMPT = "لطفا شماره سفارش خود را وارد کنید";
+const ORDER_PHONE_PROMPT = "شماره موبایلی که با آن سفارش را ثبت کردید وارد کنید.";
+const INVALID_ORDER_PHONE_TEXT = [
+  "شماره موبایل وارد شده اشتباه است.",
+  "باید همان شماره که با آن سفارش ثبت شده را وارد نمایید.",
+].join("\n");
+
 const env = {
   TELEGRAM_BOT_TOKEN: "telegram-token",
   TELEGRAM_WEBHOOK_SECRET: "webhook-secret",
@@ -33,6 +40,18 @@ function jsonResponse(value, status = 200) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function phonePromptReply(orderId, text = ORDER_PHONE_PROMPT) {
+  return {
+    text,
+    entities: [{
+      type: "text_link",
+      offset: text.length - 1,
+      length: 1,
+      url: `https://t.me/#khosh-order-${orderId}`,
+    }],
+  };
 }
 
 test("rejects a webhook with the wrong secret", async () => {
@@ -97,6 +116,10 @@ test("shows a public order-status button on start", async () => {
   assert.equal(response.status, 200);
   const body = JSON.parse(calls[0].options.body);
   assert.equal(body.reply_markup.keyboard[0][0].text, "📦 پیگیری وضعیت سفارش");
+  assert.equal(
+    body.text,
+    "سلام. به ربات خوشمزه فروشی خوش آمدید.\nچه کمکی میتونم بهتون بکنم؟",
+  );
   assert.doesNotMatch(body.text, /فرمان‌های مدیریت/);
 });
 
@@ -118,17 +141,19 @@ test("order button requests the order ID with Telegram UI", async () => {
   );
 
   const body = JSON.parse(calls[0].options.body);
-  assert.match(body.text, /شماره سفارش/);
+  assert.equal(body.text, ORDER_ID_PROMPT);
+  assert.doesNotMatch(body.text, /مثال/);
+  assert.equal(body.reply_markup.input_field_placeholder, "شماره سفارش");
   assert.equal(body.reply_markup.force_reply, true);
 });
 
-test("order ID reply requests the exact billing mobile number", async () => {
+test("shows the exact invalid order ID text without an example", async () => {
   const calls = [];
   await handleRequest(
     webhookRequest({
       message: {
-        text: "۱۲۳۴۵",
-        reply_to_message: { text: "لطفاً شماره سفارش را وارد کنید.\nمثال: 12345" },
+        text: "اشتباه",
+        reply_to_message: { text: ORDER_ID_PROMPT },
         from: { id: 99 },
         chat: { id: 99, type: "private" },
       },
@@ -141,9 +166,33 @@ test("order ID reply requests the exact billing mobile number", async () => {
   );
 
   const body = JSON.parse(calls[0].options.body);
-  assert.match(body.text, /سفارش #12345/);
-  assert.match(body.text, /شماره موبایلی که.*ثبت شده/);
-  assert.match(body.text, /ممکن است این شماره با شماره شخصی شما متفاوت باشد/);
+  assert.equal(body.text, "شماره سفارش وارد شده اشتباه است");
+  assert.doesNotMatch(body.text, /مثال/);
+  assert.equal(body.reply_markup.force_reply, true);
+});
+
+test("order ID reply requests the exact billing mobile number", async () => {
+  const calls = [];
+  await handleRequest(
+    webhookRequest({
+      message: {
+        text: "۱۲۳۴۵",
+        reply_to_message: { text: ORDER_ID_PROMPT },
+        from: { id: 99 },
+        chat: { id: 99, type: "private" },
+      },
+    }),
+    env,
+    async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ ok: true, result: {} });
+    },
+  );
+
+  const body = JSON.parse(calls[0].options.body);
+  assert.equal(body.text, ORDER_PHONE_PROMPT);
+  assert.doesNotMatch(body.text, /توجه|مثال|12345/);
+  assert.equal(body.entities[0].url, "https://t.me/#khosh-order-12345");
   assert.equal(body.reply_markup.force_reply, true);
 });
 
@@ -165,9 +214,7 @@ test("matching order ID and billing phone returns the Persian status", async () 
     webhookRequest({
       message: {
         text: "۰۹۱۲۳۴۵۶۷۸۹",
-        reply_to_message: {
-          text: "شماره موبایلی که سفارش #12345 با آن ثبت شده است را وارد کنید.\nتوجه: ممکن است این شماره با شماره شخصی شما متفاوت باشد.",
-        },
+        reply_to_message: phonePromptReply("12345"),
         from: { id: 99 },
         chat: { id: 99, type: "private" },
       },
@@ -204,9 +251,7 @@ test("does not follow WooCommerce redirects with the authorization header", asyn
     webhookRequest({
       message: {
         text: "09123456789",
-        reply_to_message: {
-          text: "شماره موبایلی که سفارش #12345 با آن ثبت شده است را وارد کنید.",
-        },
+        reply_to_message: phonePromptReply("12345"),
         from: { id: 99 },
         chat: { id: 99, type: "private" },
       },
@@ -241,9 +286,7 @@ test("wrong billing phone uses the same generic not-found response", async () =>
     webhookRequest({
       message: {
         text: "09123456789",
-        reply_to_message: {
-          text: "شماره موبایلی که سفارش #12345 با آن ثبت شده است را وارد کنید.",
-        },
+        reply_to_message: phonePromptReply("12345"),
         from: { id: 99 },
         chat: { id: 99, type: "private" },
       },
@@ -254,7 +297,7 @@ test("wrong billing phone uses the same generic not-found response", async () =>
 
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
-  assert.equal(body.text, "سفارش پیدا نشد یا شماره موبایل با سفارش مطابقت ندارد.");
+  assert.equal(body.text, "سفارش با این مشخصات یافت نشد");
 });
 
 test("invalid mobile input keeps the user in the phone step", async () => {
@@ -263,9 +306,7 @@ test("invalid mobile input keeps the user in the phone step", async () => {
     webhookRequest({
       message: {
         text: "123",
-        reply_to_message: {
-          text: "شماره موبایل معتبر نیست.\n\nشماره موبایلی که سفارش #12345 با آن ثبت شده است را وارد کنید.",
-        },
+        reply_to_message: phonePromptReply("12345"),
         from: { id: 99 },
         chat: { id: 99, type: "private" },
       },
@@ -279,9 +320,41 @@ test("invalid mobile input keeps the user in the phone step", async () => {
 
   assert.equal(calls.length, 1);
   const body = JSON.parse(calls[0].options.body);
-  assert.match(body.text, /شماره موبایل معتبر نیست/);
-  assert.match(body.text, /سفارش #12345/);
+  assert.equal(body.text, INVALID_ORDER_PHONE_TEXT);
+  assert.equal(body.entities[0].url, "https://t.me/#khosh-order-12345");
   assert.equal(body.reply_markup.force_reply, true);
+});
+
+test("valid phone can continue after the invalid-phone message", async () => {
+  const calls = [];
+  const fetchMock = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url.includes("/wp-json/wc/v3/orders/12345")) {
+      return jsonResponse({
+        id: 12345,
+        status: "completed",
+        billing: { phone: "09123456789" },
+      });
+    }
+    return jsonResponse({ ok: true, result: {} });
+  };
+
+  await handleRequest(
+    webhookRequest({
+      message: {
+        text: "09123456789",
+        reply_to_message: phonePromptReply("12345", INVALID_ORDER_PHONE_TEXT),
+        from: { id: 99 },
+        chat: { id: 99, type: "private" },
+      },
+    }),
+    env,
+    fetchMock,
+  );
+
+  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
+  const body = JSON.parse(telegramCall.options.body);
+  assert.equal(body.text, "وضعیت سفارش #12345: تکمیل شده");
 });
 
 test("ignores public order lookup in group chats", async () => {
