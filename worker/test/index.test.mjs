@@ -46,6 +46,15 @@ function telegramSuccess() {
   return jsonResponse({ ok: true, result: { message_id: 123 } });
 }
 
+function sentTelegramBody(calls, expectedText) {
+  const call = calls.find((item) => {
+    if (!item.url.includes("/sendMessage")) return false;
+    return JSON.parse(item.options.body).text === expectedText;
+  });
+  assert.ok(call);
+  return JSON.parse(call.options.body);
+}
+
 function phonePromptReply(orderId, text = ORDER_PHONE_PROMPT) {
   return {
     text,
@@ -118,11 +127,11 @@ test("shows public order-status and support buttons on start", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.equal(calls.length, 2);
-  const sentBody = JSON.parse(calls[0].options.body);
-  assert.equal(sentBody.reply_markup.remove_keyboard, true);
-  assert.match(calls[1].url, /\/editMessageReplyMarkup$/);
-  const menuBody = JSON.parse(calls[1].options.body);
+  assert.equal(calls.length, 3);
+  const cleanupBody = JSON.parse(calls[0].options.body);
+  assert.equal(cleanupBody.reply_markup.remove_keyboard, true);
+  const sentBody = JSON.parse(calls[1].options.body);
+  const menuBody = sentBody;
   const [orderButton, supportButton] = menuBody.reply_markup.inline_keyboard[0];
   assert.deepEqual(orderButton, {
     text: "📦 پیگیری وضعیت سفارش",
@@ -137,6 +146,7 @@ test("shows public order-status and support buttons on start", async () => {
     "سلام. به ربات خوشمزه فروشی خوش آمدید.\nچه کمکی میتونم بهتون بکنم؟",
   );
   assert.doesNotMatch(sentBody.text, /فرمان‌های مدیریت/);
+  assert.match(calls[2].url, /\/deleteMessage$/);
 });
 
 test("public order callback starts lookup without admin access", async () => {
@@ -182,7 +192,7 @@ test("shows the exact start message to the admin without extra command text", as
     },
   );
 
-  const body = JSON.parse(calls[0].options.body);
+  const body = JSON.parse(calls[1].options.body);
   assert.equal(
     body.text,
     "سلام. به ربات خوشمزه فروشی خوش آمدید.\nچه کمکی میتونم بهتون بکنم؟",
@@ -295,9 +305,9 @@ test("matching order ID and billing phone returns the Persian status", async () 
   assert.equal(wooCall.options.redirect, "manual");
   assert.match(wooCall.options.headers.Authorization, /^Basic /);
   assert.doesNotMatch(wooCall.url, /consumer_(key|secret)/);
-  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
-  const body = JSON.parse(telegramCall.options.body);
-  assert.equal(body.text, "وضعیت سفارش #12345: در حال پردازش");
+  const expectedText = "وضعیت سفارش #12345: در حال پردازش";
+  const body = sentTelegramBody(calls, expectedText);
+  assert.equal(body.text, expectedText);
 });
 
 test("does not follow WooCommerce redirects with the authorization header", async () => {
@@ -329,9 +339,9 @@ test("does not follow WooCommerce redirects with the authorization header", asyn
   const wooCalls = calls.filter((call) => call.url.includes("/wp-json/wc/v3/orders/"));
   assert.equal(wooCalls.length, 1);
   assert.equal(wooCalls[0].options.redirect, "manual");
-  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
-  const body = JSON.parse(telegramCall.options.body);
-  assert.match(body.text, /موقتاً در دسترس نیست/);
+  const expectedText = "سرویس پیگیری سفارش موقتاً در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید.";
+  const body = sentTelegramBody(calls, expectedText);
+  assert.equal(body.text, expectedText);
 });
 
 test("wrong billing phone uses the same generic not-found response", async () => {
@@ -361,9 +371,9 @@ test("wrong billing phone uses the same generic not-found response", async () =>
     fetchMock,
   );
 
-  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
-  const body = JSON.parse(telegramCall.options.body);
-  assert.equal(body.text, "سفارش با این مشخصات یافت نشد");
+  const expectedText = "سفارش با این مشخصات یافت نشد";
+  const body = sentTelegramBody(calls, expectedText);
+  assert.equal(body.text, expectedText);
 });
 
 test("invalid mobile input keeps the user in the phone step", async () => {
@@ -418,9 +428,9 @@ test("valid phone can continue after the invalid-phone message", async () => {
     fetchMock,
   );
 
-  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
-  const body = JSON.parse(telegramCall.options.body);
-  assert.equal(body.text, "وضعیت سفارش #12345: تکمیل شده");
+  const expectedText = "وضعیت سفارش #12345: تکمیل شده";
+  const body = sentTelegramBody(calls, expectedText);
+  assert.equal(body.text, expectedText);
 });
 
 test("ignores public order lookup in group chats", async () => {
