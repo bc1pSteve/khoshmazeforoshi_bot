@@ -1,9 +1,11 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "khoshmazeforoshi-telegram-controller",
+  "name": "khoshmazeforoshi-bot",
   "main": "src/index.js",
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
   "vars": {
     "GITHUB_OWNER": "bc1pSteve",
     "GITHUB_REPO": "khoshmazeforoshi_bot",
