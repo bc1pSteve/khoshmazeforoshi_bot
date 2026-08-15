@@ -1,5 +1,5 @@
 const TELEGRAM_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
-const ORDER_BUTTON_TEXT = "📦 پیگیری وضعیت سفارش";
+const ORDER_BUTTON_TEXT = "📦 پیگیری سفارش";
 const SUPPORT_BUTTON_TEXT = "💬 ارتباط با ادمین";
 const SUPPORT_URL = "https://t.me/khoshmazeforoshi_supp";
 const ORDER_ID_PROMPT = "لطفا شماره سفارش خود را وارد کنید";
