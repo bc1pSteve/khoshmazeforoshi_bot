@@ -96,7 +96,7 @@ test("ignores admin commands from non-admin users", async () => {
   assert.equal(calls, 0);
 });
 
-test("shows a public order-status button on start", async () => {
+test("shows public order-status and support buttons on start", async () => {
   const calls = [];
   const response = await handleRequest(
     webhookRequest({
@@ -106,7 +106,7 @@ test("shows a public order-status button on start", async () => {
         chat: { id: 99, type: "private" },
       },
     }),
-    env,
+    { ...env, TELEGRAM_ADMIN_USER_ID: "" },
     async (url, options) => {
       calls.push({ url, options });
       return jsonResponse({ ok: true, result: {} });
@@ -115,12 +115,46 @@ test("shows a public order-status button on start", async () => {
 
   assert.equal(response.status, 200);
   const body = JSON.parse(calls[0].options.body);
-  assert.equal(body.reply_markup.keyboard[0][0].text, "📦 پیگیری وضعیت سفارش");
+  const [orderButton, supportButton] = body.reply_markup.inline_keyboard[0];
+  assert.deepEqual(orderButton, {
+    text: "📦 پیگیری وضعیت سفارش",
+    callback_data: "order",
+  });
+  assert.deepEqual(supportButton, {
+    text: "💬 ارتباط با ادمین",
+    url: "https://t.me/khoshmazeforoshi_supp",
+  });
   assert.equal(
     body.text,
     "سلام. به ربات خوشمزه فروشی خوش آمدید.\nچه کمکی میتونم بهتون بکنم؟",
   );
   assert.doesNotMatch(body.text, /فرمان‌های مدیریت/);
+});
+
+test("public order callback starts lookup without admin access", async () => {
+  const calls = [];
+  await handleRequest(
+    webhookRequest({
+      callback_query: {
+        id: "public-order-callback",
+        data: "order",
+        from: { id: 99 },
+        message: { message_id: 8, chat: { id: 99, type: "private" } },
+      },
+    }),
+    { ...env, TELEGRAM_ADMIN_USER_ID: "" },
+    async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ ok: true, result: {} });
+    },
+  );
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /\/answerCallbackQuery$/);
+  assert.match(calls[1].url, /\/sendMessage$/);
+  const body = JSON.parse(calls[1].options.body);
+  assert.equal(body.text, ORDER_ID_PROMPT);
+  assert.equal(body.reply_markup.force_reply, true);
 });
 
 test("shows the exact start message to the admin without extra command text", async () => {
