@@ -46,6 +46,18 @@ async function safeEqual(left, right) {
   return difference === 0;
 }
 
+async function sha256Hex(value) {
+  const bytes = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value || ""))),
+  );
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function validBaleWebhookSecret(value, env) {
+  if (!value || !env.BALE_WEBHOOK_SECRET_SHA256) return false;
+  return safeEqual(await sha256Hex(value), env.BALE_WEBHOOK_SECRET_SHA256);
+}
+
 function isAdmin(userId, env) {
   return String(userId || "") === String(env.TELEGRAM_ADMIN_USER_ID || "");
 }
@@ -705,10 +717,7 @@ export async function handleRequest(request, env, fetchImpl = globalThis.fetch) 
   const pathname = new URL(request.url).pathname;
   if (pathname.startsWith(BALE_WEBHOOK_PATH_PREFIX)) {
     const webhookSecret = pathname.slice(BALE_WEBHOOK_PATH_PREFIX.length);
-    if (webhookSecret.includes("/") || !await safeEqual(
-      webhookSecret,
-      env.BALE_WEBHOOK_SECRET,
-    )) {
+    if (webhookSecret.includes("/") || !await validBaleWebhookSecret(webhookSecret, env)) {
       return new Response("Unauthorized", { status: 401 });
     }
 
