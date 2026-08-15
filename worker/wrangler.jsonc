@@ -6,6 +6,12 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "kv_namespaces": [
+    {
+      "binding": "ORDER_SESSIONS",
+      "id": "f1e18e71b5644bddaf87938a054b1a65"
+    }
+  ],
   "vars": {
     "GITHUB_OWNER": "bc1pSteve",
     "GITHUB_REPO": "khoshmazeforoshi_bot",
