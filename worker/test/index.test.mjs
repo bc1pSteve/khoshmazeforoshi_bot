@@ -134,7 +134,7 @@ test("shows public order-status and support buttons on start", async () => {
   const menuBody = sentBody;
   const [orderButton, supportButton] = menuBody.reply_markup.inline_keyboard[0];
   assert.deepEqual(orderButton, {
-    text: "📦 پیگیری وضعیت سفارش",
+    text: "📦 پیگیری سفارش",
     callback_data: "order",
   });
   assert.deepEqual(supportButton, {
@@ -204,7 +204,7 @@ test("order button requests the order ID with Telegram UI", async () => {
   await handleRequest(
     webhookRequest({
       message: {
-        text: "📦 پیگیری وضعیت سفارش",
+        text: "📦 پیگیری سفارش",
         from: { id: 99 },
         chat: { id: 99, type: "private" },
       },
@@ -438,7 +438,7 @@ test("ignores public order lookup in group chats", async () => {
   const response = await handleRequest(
     webhookRequest({
       message: {
-        text: "📦 پیگیری وضعیت سفارش",
+        text: "📦 پیگیری سفارش",
         from: { id: 99 },
         chat: { id: -100, type: "supergroup" },
       },
