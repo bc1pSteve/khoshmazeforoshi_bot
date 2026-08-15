@@ -42,6 +42,10 @@ function jsonResponse(value, status = 200) {
   });
 }
 
+function telegramSuccess() {
+  return jsonResponse({ ok: true, result: { message_id: 123 } });
+}
+
 function phonePromptReply(orderId, text = ORDER_PHONE_PROMPT) {
   return {
     text,
@@ -109,13 +113,17 @@ test("shows public order-status and support buttons on start", async () => {
     { ...env, TELEGRAM_ADMIN_USER_ID: "" },
     async (url, options) => {
       calls.push({ url, options });
-      return jsonResponse({ ok: true, result: {} });
+      return telegramSuccess();
     },
   );
 
   assert.equal(response.status, 200);
-  const body = JSON.parse(calls[0].options.body);
-  const [orderButton, supportButton] = body.reply_markup.inline_keyboard[0];
+  assert.equal(calls.length, 2);
+  const sentBody = JSON.parse(calls[0].options.body);
+  assert.equal(sentBody.reply_markup.remove_keyboard, true);
+  assert.match(calls[1].url, /\/editMessageReplyMarkup$/);
+  const menuBody = JSON.parse(calls[1].options.body);
+  const [orderButton, supportButton] = menuBody.reply_markup.inline_keyboard[0];
   assert.deepEqual(orderButton, {
     text: "📦 پیگیری وضعیت سفارش",
     callback_data: "order",
@@ -125,10 +133,10 @@ test("shows public order-status and support buttons on start", async () => {
     url: "https://t.me/khoshmazeforoshi_supp",
   });
   assert.equal(
-    body.text,
+    sentBody.text,
     "سلام. به ربات خوشمزه فروشی خوش آمدید.\nچه کمکی میتونم بهتون بکنم؟",
   );
-  assert.doesNotMatch(body.text, /فرمان‌های مدیریت/);
+  assert.doesNotMatch(sentBody.text, /فرمان‌های مدیریت/);
 });
 
 test("public order callback starts lookup without admin access", async () => {
@@ -145,7 +153,7 @@ test("public order callback starts lookup without admin access", async () => {
     { ...env, TELEGRAM_ADMIN_USER_ID: "" },
     async (url, options) => {
       calls.push({ url, options });
-      return jsonResponse({ ok: true, result: {} });
+      return telegramSuccess();
     },
   );
 
@@ -170,7 +178,7 @@ test("shows the exact start message to the admin without extra command text", as
     env,
     async (url, options) => {
       calls.push({ url, options });
-      return jsonResponse({ ok: true, result: {} });
+      return telegramSuccess();
     },
   );
 
@@ -194,7 +202,7 @@ test("order button requests the order ID with Telegram UI", async () => {
     env,
     async (url, options) => {
       calls.push({ url, options });
-      return jsonResponse({ ok: true, result: {} });
+      return telegramSuccess();
     },
   );
 
@@ -219,7 +227,7 @@ test("shows the exact invalid order ID text without an example", async () => {
     env,
     async (url, options) => {
       calls.push({ url, options });
-      return jsonResponse({ ok: true, result: {} });
+      return telegramSuccess();
     },
   );
 
@@ -243,7 +251,7 @@ test("order ID reply requests the exact billing mobile number", async () => {
     env,
     async (url, options) => {
       calls.push({ url, options });
-      return jsonResponse({ ok: true, result: {} });
+      return telegramSuccess();
     },
   );
 
@@ -265,7 +273,7 @@ test("matching order ID and billing phone returns the Persian status", async () 
         billing: { phone: "+98 912 345 6789" },
       });
     }
-    return jsonResponse({ ok: true, result: {} });
+    return telegramSuccess();
   };
 
   await handleRequest(
@@ -302,7 +310,7 @@ test("does not follow WooCommerce redirects with the authorization header", asyn
         headers: { Location: "https://other.example/orders/12345" },
       });
     }
-    return jsonResponse({ ok: true, result: {} });
+    return telegramSuccess();
   };
 
   await handleRequest(
@@ -337,7 +345,7 @@ test("wrong billing phone uses the same generic not-found response", async () =>
         billing: { phone: "09120000000" },
       });
     }
-    return jsonResponse({ ok: true, result: {} });
+    return telegramSuccess();
   };
 
   await handleRequest(
@@ -372,7 +380,7 @@ test("invalid mobile input keeps the user in the phone step", async () => {
     env,
     async (url, options) => {
       calls.push({ url, options });
-      return jsonResponse({ ok: true, result: {} });
+      return telegramSuccess();
     },
   );
 
@@ -394,7 +402,7 @@ test("valid phone can continue after the invalid-phone message", async () => {
         billing: { phone: "09123456789" },
       });
     }
-    return jsonResponse({ ok: true, result: {} });
+    return telegramSuccess();
   };
 
   await handleRequest(
@@ -437,7 +445,7 @@ test("shows confirmation buttons for an admin post command", async () => {
   const calls = [];
   const fetchMock = async (url, options) => {
     calls.push({ url, options });
-    return jsonResponse({ ok: true, result: {} });
+    return telegramSuccess();
   };
 
   const response = await handleRequest(
@@ -463,7 +471,7 @@ test("confirmed callback dispatches GitHub workflow with product and chat IDs", 
   const fetchMock = async (url, options = {}) => {
     calls.push({ url, options });
     if (url.includes("api.github.com")) return new Response(null, { status: 204 });
-    return jsonResponse({ ok: true, result: {} });
+    return telegramSuccess();
   };
 
   const response = await handleRequest(
