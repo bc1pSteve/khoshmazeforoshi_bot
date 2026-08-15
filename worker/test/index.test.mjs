@@ -10,6 +10,24 @@ const INVALID_ORDER_PHONE_TEXT = [
   "باید همان شماره که با آن سفارش ثبت شده را وارد نمایید.",
 ].join("\n");
 
+class MemoryKv {
+  constructor() {
+    this.values = new Map();
+  }
+
+  async get(key) {
+    return this.values.get(key) ?? null;
+  }
+
+  async put(key, value) {
+    this.values.set(key, String(value));
+  }
+
+  async delete(key) {
+    this.values.delete(key);
+  }
+}
+
 const env = {
   TELEGRAM_BOT_TOKEN: "telegram-token",
   TELEGRAM_WEBHOOK_SECRET: "webhook-secret",
@@ -22,6 +40,8 @@ const env = {
   WOOCOMMERCE_BASE_URL: "https://shop.example",
   WOOCOMMERCE_CONSUMER_KEY: "ck_read_only",
   WOOCOMMERCE_CONSUMER_SECRET: "cs_read_only",
+  BALE_BOT_TOKEN: "bale-token",
+  BALE_WEBHOOK_SECRET: "bale-webhook-secret",
 };
 
 function webhookRequest(update, secret = "webhook-secret") {
@@ -31,6 +51,14 @@ function webhookRequest(update, secret = "webhook-secret") {
       "Content-Type": "application/json",
       "X-Telegram-Bot-Api-Secret-Token": secret,
     },
+    body: JSON.stringify(update),
+  });
+}
+
+function baleWebhookRequest(update, secret = "bale-webhook-secret") {
+  return new Request(`https://worker.example/bale/${secret}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(update),
   });
 }
@@ -504,4 +532,138 @@ test("confirmed callback dispatches GitHub workflow with product and chat IDs", 
   assert.deepEqual(body.inputs, { product_id: "P001", request_chat_id: "42" });
   const editedMessage = calls.find((call) => call.url.includes("/editMessageText"));
   assert.ok(editedMessage);
+});
+
+test("rejects a Bale webhook with the wrong path secret", async () => {
+  let calls = 0;
+  const response = await handleRequest(
+    baleWebhookRequest({}, "wrong-secret"),
+    { ...env, ORDER_SESSIONS: new MemoryKv() },
+    async () => { calls += 1; },
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal(calls, 0);
+});
+
+test("shows public order-status and support buttons on Bale start", async () => {
+  const calls = [];
+  const response = await handleRequest(
+    baleWebhookRequest({
+      message: {
+        text: "/start",
+        from: { id: 99 },
+        chat: { id: 99, type: "private" },
+      },
+    }),
+    { ...env, ORDER_SESSIONS: new MemoryKv() },
+    async (url, options) => {
+      calls.push({ url, options });
+      return telegramSuccess();
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /^https:\/\/tapi\.bale\.ai\/botbale-token\/sendMessage$/);
+  const body = JSON.parse(calls[0].options.body);
+  const [orderButton, supportButton] = body.reply_markup.inline_keyboard[0];
+  assert.deepEqual(orderButton, {
+    text: "📦 پیگیری سفارش",
+    callback_data: "order",
+  });
+  assert.deepEqual(supportButton, {
+    text: "💬 ارتباط با ادمین",
+    url: "https://ble.ir/khoshmazeforoshi_supp",
+  });
+  assert.equal(
+    body.text,
+    "سلام. به ربات خوشمزه فروشی خوش آمدید.\nچه کمکی میتونم بهتون بکنم؟",
+  );
+});
+
+test("Bale order callback stores the conversation step and requests the order ID", async () => {
+  const calls = [];
+  const sessions = new MemoryKv();
+  await handleRequest(
+    baleWebhookRequest({
+      callback_query: {
+        id: "bale-order-callback",
+        data: "order",
+        from: { id: 99 },
+        message: { message_id: 8, chat: { id: 99, type: "private" } },
+      },
+    }),
+    { ...env, ORDER_SESSIONS: sessions },
+    async (url, options) => {
+      calls.push({ url, options });
+      return telegramSuccess();
+    },
+  );
+
+  assert.equal(await sessions.get("bale:awaiting_order:99"), "1");
+  assert.match(calls[0].url, /\/answerCallbackQuery$/);
+  assert.equal(JSON.parse(calls[1].options.body).text, ORDER_ID_PROMPT);
+});
+
+test("Bale order lookup collects order ID and phone and returns the Persian status", async () => {
+  const calls = [];
+  const sessions = new MemoryKv();
+  const baleEnv = { ...env, ORDER_SESSIONS: sessions };
+  const fetchMock = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url.includes("/wp-json/wc/v3/orders/12345")) {
+      return jsonResponse({
+        id: 12345,
+        status: "completed",
+        billing: { phone: "09123456789" },
+      });
+    }
+    return telegramSuccess();
+  };
+
+  await sessions.put("bale:awaiting_order:99", "1");
+  await handleRequest(
+    baleWebhookRequest({
+      message: {
+        text: "۱۲۳۴۵",
+        from: { id: 99 },
+        chat: { id: 99, type: "private" },
+      },
+    }),
+    baleEnv,
+    fetchMock,
+  );
+
+  assert.equal(await sessions.get("bale:awaiting_order:99"), null);
+  assert.equal(await sessions.get("bale:awaiting_phone:99"), "12345");
+  const phonePromptCall = calls.find((call) => {
+    if (!call.url.endsWith("/sendMessage")) return false;
+    return JSON.parse(call.options.body).text === ORDER_PHONE_PROMPT;
+  });
+  assert.ok(phonePromptCall);
+
+  await handleRequest(
+    baleWebhookRequest({
+      message: {
+        text: "۰۹۱۲۳۴۵۶۷۸۹",
+        from: { id: 99 },
+        chat: { id: 99, type: "private" },
+      },
+    }),
+    baleEnv,
+    fetchMock,
+  );
+
+  assert.equal(await sessions.get("bale:awaiting_phone:99"), null);
+  const wooCall = calls.find((call) => call.url.includes("/wp-json/wc/v3/orders/12345"));
+  assert.ok(wooCall);
+  assert.equal(wooCall.options.redirect, "manual");
+  const statusCall = calls.find((call) => {
+    if (!call.url.endsWith("/sendMessage")) return false;
+    return JSON.parse(call.options.body).text === "وضعیت سفارش #12345: تکمیل شده";
+  });
+  assert.ok(statusCall);
+  const statusBody = JSON.parse(statusCall.options.body);
+  assert.equal(statusBody.reply_markup.inline_keyboard[0][1].url, "https://ble.ir/khoshmazeforoshi_supp");
 });
