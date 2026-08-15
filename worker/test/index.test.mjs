@@ -179,11 +179,48 @@ test("matching order ID and billing phone returns the Persian status", async () 
   const wooCall = calls.find((call) => call.url.includes("/wp-json/wc/v3/orders/12345"));
   assert.ok(wooCall);
   assert.equal(wooCall.options.method, "GET");
+  assert.equal(wooCall.options.redirect, "manual");
   assert.match(wooCall.options.headers.Authorization, /^Basic /);
   assert.doesNotMatch(wooCall.url, /consumer_(key|secret)/);
   const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
   const body = JSON.parse(telegramCall.options.body);
   assert.equal(body.text, "وضعیت سفارش #12345: در حال پردازش");
+});
+
+test("does not follow WooCommerce redirects with the authorization header", async () => {
+  const calls = [];
+  const fetchMock = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url.includes("/wp-json/wc/v3/orders/12345")) {
+      return new Response(null, {
+        status: 301,
+        headers: { Location: "https://other.example/orders/12345" },
+      });
+    }
+    return jsonResponse({ ok: true, result: {} });
+  };
+
+  await handleRequest(
+    webhookRequest({
+      message: {
+        text: "09123456789",
+        reply_to_message: {
+          text: "شماره موبایلی که سفارش #12345 با آن ثبت شده است را وارد کنید.",
+        },
+        from: { id: 99 },
+        chat: { id: 99, type: "private" },
+      },
+    }),
+    env,
+    fetchMock,
+  );
+
+  const wooCalls = calls.filter((call) => call.url.includes("/wp-json/wc/v3/orders/"));
+  assert.equal(wooCalls.length, 1);
+  assert.equal(wooCalls[0].options.redirect, "manual");
+  const telegramCall = calls.find((call) => call.url.includes("/sendMessage"));
+  const body = JSON.parse(telegramCall.options.body);
+  assert.match(body.text, /موقتاً در دسترس نیست/);
 });
 
 test("wrong billing phone uses the same generic not-found response", async () => {

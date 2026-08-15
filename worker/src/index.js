@@ -173,9 +173,12 @@ async function getWooCommerceOrder(orderId, env, fetchImpl) {
       Accept: "application/json",
       Authorization: `Basic ${credentials}`,
     },
-    redirect: "error",
+    redirect: "manual",
   });
 
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error("WooCommerce request redirected; check the canonical store URL");
+  }
   if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error(`WooCommerce request failed (${response.status})`);
