@@ -1,8 +1,14 @@
 const TELEGRAM_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
 const ORDER_BUTTON_TEXT = "📦 پیگیری وضعیت سفارش";
-const ORDER_ID_PROMPT = "لطفاً شماره سفارش را وارد کنید.";
-const ORDER_PHONE_PROMPT_PREFIX = "شماره موبایلی که سفارش #";
-const ORDER_NOT_FOUND_TEXT = "سفارش پیدا نشد یا شماره موبایل با سفارش مطابقت ندارد.";
+const ORDER_ID_PROMPT = "لطفا شماره سفارش خود را وارد کنید";
+const INVALID_ORDER_ID_TEXT = "شماره سفارش وارد شده اشتباه است";
+const ORDER_PHONE_PROMPT = "شماره موبایلی که با آن سفارش را ثبت کردید وارد کنید.";
+const INVALID_ORDER_PHONE_TEXT = [
+  "شماره موبایل وارد شده اشتباه است.",
+  "باید همان شماره که با آن سفارش ثبت شده را وارد نمایید.",
+].join("\n");
+const ORDER_NOT_FOUND_TEXT = "سفارش با این مشخصات یافت نشد";
+const ORDER_STATE_URL_PREFIX = "https://t.me/#khosh-order-";
 
 const ORDER_STATUS_LABELS = {
   pending: "در انتظار پرداخت",
@@ -191,18 +197,28 @@ async function getWooCommerceOrder(orderId, env, fetchImpl) {
   return payload;
 }
 
-function phonePrompt(orderId) {
-  return [
-    `${ORDER_PHONE_PROMPT_PREFIX}${orderId} با آن ثبت شده است را وارد کنید.`,
-    "توجه: ممکن است این شماره با شماره شخصی شما متفاوت باشد.",
-    "مثال: 09123456789",
-  ].join("\n");
+function orderIdEntity(text, orderId) {
+  return [{
+    type: "text_link",
+    offset: text.length - 1,
+    length: 1,
+    url: `${ORDER_STATE_URL_PREFIX}${orderId}`,
+  }];
 }
 
-function orderIdFromPhonePrompt(text) {
-  const prompt = String(text || "");
-  if (!prompt.includes(ORDER_PHONE_PROMPT_PREFIX)) return null;
-  return normalizeOrderId(prompt.match(/#(\d{1,12})/)?.[1]);
+function orderIdFromPhonePrompt(message) {
+  const prompt = String(message?.text || "");
+  if (prompt !== ORDER_PHONE_PROMPT && prompt !== INVALID_ORDER_PHONE_TEXT) {
+    const legacyOrderId = prompt.match(/#(\d{1,12})/)?.[1];
+    return normalizeOrderId(legacyOrderId);
+  }
+
+  const stateEntity = message?.entities?.find(
+    (entity) => entity.type === "text_link"
+      && String(entity.url || "").startsWith(ORDER_STATE_URL_PREFIX),
+  );
+  if (!stateEntity) return null;
+  return normalizeOrderId(String(stateEntity.url).slice(ORDER_STATE_URL_PREFIX.length));
 }
 
 async function requestOrderId(chatId, env, fetchImpl, invalid = false) {
@@ -210,10 +226,8 @@ async function requestOrderId(chatId, env, fetchImpl, invalid = false) {
     "sendMessage",
     {
       chat_id: chatId,
-      text: invalid
-        ? `شماره سفارش معتبر نیست.\n\n${ORDER_ID_PROMPT}`
-        : `${ORDER_ID_PROMPT}\nمثال: 12345`,
-      reply_markup: forceReply("مثال: 12345"),
+      text: invalid ? INVALID_ORDER_ID_TEXT : ORDER_ID_PROMPT,
+      reply_markup: forceReply("شماره سفارش"),
     },
     env,
     fetchImpl,
@@ -221,13 +235,13 @@ async function requestOrderId(chatId, env, fetchImpl, invalid = false) {
 }
 
 async function requestOrderPhone(chatId, orderId, env, fetchImpl, invalid = false) {
+  const text = invalid ? INVALID_ORDER_PHONE_TEXT : ORDER_PHONE_PROMPT;
   await telegram(
     "sendMessage",
     {
       chat_id: chatId,
-      text: invalid
-        ? `شماره موبایل معتبر نیست.\n\n${phonePrompt(orderId)}`
-        : phonePrompt(orderId),
+      text,
+      entities: orderIdEntity(text, orderId),
       reply_markup: forceReply("شماره موبایل ثبت‌شده در سفارش"),
     },
     env,
@@ -293,9 +307,8 @@ async function handleMessage(message, env, fetchImpl) {
 
   if (command === "/start" || command === "/help") {
     const lines = [
-      "سلام! برای مشاهده وضعیت سفارشتان، دکمه زیر را بزنید.",
-      "",
-      "اطلاعات سفارش فقط پس از تطبیق شماره موبایل ثبت‌شده در سفارش نمایش داده می‌شود.",
+      "سلام. به ربات خوشمزه فروشی خوش آمدید.",
+      "چه کمکی میتونم بهتون بکنم؟",
     ];
     if (admin) {
       lines.push(
@@ -324,7 +337,7 @@ async function handleMessage(message, env, fetchImpl) {
   }
 
   const repliedTo = String(message.reply_to_message?.text || "");
-  if (repliedTo.includes(ORDER_ID_PROMPT)) {
+  if (repliedTo === ORDER_ID_PROMPT || repliedTo === INVALID_ORDER_ID_TEXT) {
     const orderId = normalizeOrderId(text);
     if (!orderId) {
       await requestOrderId(chatId, env, fetchImpl, true);
@@ -334,7 +347,7 @@ async function handleMessage(message, env, fetchImpl) {
     return;
   }
 
-  const orderId = orderIdFromPhonePrompt(repliedTo);
+  const orderId = orderIdFromPhonePrompt(message.reply_to_message);
   if (orderId) {
     const phone = normalizeIranianMobile(text);
     if (!phone) {
