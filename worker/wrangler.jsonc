@@ -16,7 +16,8 @@
     "GITHUB_OWNER": "bc1pSteve",
     "GITHUB_REPO": "khoshmazeforoshi_bot",
     "GITHUB_WORKFLOW": "post.yml",
-    "GITHUB_REF": "main"
+    "GITHUB_REF": "main",
+    "BALE_WEBHOOK_SECRET_SHA256": "380664571067e06afed260cce4807c5ba7d726a7240a503459846ff497bfa845"
   },
   "observability": {
     "enabled": true,
