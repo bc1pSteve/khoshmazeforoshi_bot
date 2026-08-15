@@ -83,32 +83,42 @@ function mainMenu() {
 }
 
 async function sendMainMenuMessage(chatId, text, env, fetchImpl) {
-  const sentMessage = await telegram(
+  const cleanupMessage = await telegram(
     "sendMessage",
     {
       chat_id: chatId,
-      text,
+      text: "در حال آماده‌سازی منو…",
       reply_markup: { remove_keyboard: true },
     },
     env,
     fetchImpl,
   );
 
-  const messageId = sentMessage?.result?.message_id;
-  if (!messageId) {
-    throw new Error("Telegram sendMessage did not return a message ID");
-  }
-
   await telegram(
-    "editMessageReplyMarkup",
+    "sendMessage",
     {
       chat_id: chatId,
-      message_id: messageId,
+      text,
       reply_markup: mainMenu(),
     },
     env,
     fetchImpl,
   );
+
+  const cleanupMessageId = cleanupMessage?.result?.message_id;
+  if (cleanupMessageId) {
+    await telegram(
+      "deleteMessage",
+      { chat_id: chatId, message_id: cleanupMessageId },
+      env,
+      fetchImpl,
+    ).catch((error) => {
+      console.warn(JSON.stringify({
+        event: "telegram_menu_cleanup_failed",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    });
+  }
 }
 
 function forceReply(placeholder) {
