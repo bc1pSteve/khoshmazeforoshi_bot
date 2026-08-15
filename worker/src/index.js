@@ -310,7 +310,7 @@ async function handleMessage(message, env, fetchImpl) {
       "سلام. به ربات خوشمزه فروشی خوش آمدید.",
       "چه کمکی میتونم بهتون بکنم؟",
     ];
-    if (admin) {
+    if (admin && command === "/help") {
       lines.push(
         "",
         "فرمان‌های مدیریت:",
