@@ -41,7 +41,7 @@ const env = {
   WOOCOMMERCE_CONSUMER_KEY: "ck_read_only",
   WOOCOMMERCE_CONSUMER_SECRET: "cs_read_only",
   BALE_BOT_TOKEN: "bale-token",
-  BALE_WEBHOOK_SECRET: "bale-webhook-secret",
+  BALE_WEBHOOK_SECRET_SHA256: "9e1a4fd6839e164d466326959dfac644d2a205d87670f6c66a3b519e4c1d4975",
 };
 
 function webhookRequest(update, secret = "webhook-secret") {
