@@ -123,6 +123,30 @@ test("shows a public order-status button on start", async () => {
   assert.doesNotMatch(body.text, /فرمان‌های مدیریت/);
 });
 
+test("shows the exact start message to the admin without extra command text", async () => {
+  const calls = [];
+  await handleRequest(
+    webhookRequest({
+      message: {
+        text: "/start",
+        from: { id: 42 },
+        chat: { id: 42, type: "private" },
+      },
+    }),
+    env,
+    async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ ok: true, result: {} });
+    },
+  );
+
+  const body = JSON.parse(calls[0].options.body);
+  assert.equal(
+    body.text,
+    "سلام. به ربات خوشمزه فروشی خوش آمدید.\nچه کمکی میتونم بهتون بکنم؟",
+  );
+});
+
 test("order button requests the order ID with Telegram UI", async () => {
   const calls = [];
   await handleRequest(
