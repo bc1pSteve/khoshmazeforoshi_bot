@@ -1,5 +1,7 @@
 const TELEGRAM_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
 const ORDER_BUTTON_TEXT = "📦 پیگیری وضعیت سفارش";
+const SUPPORT_BUTTON_TEXT = "💬 ارتباط با ادمین";
+const SUPPORT_URL = "https://t.me/khoshmazeforoshi_supp";
 const ORDER_ID_PROMPT = "لطفا شماره سفارش خود را وارد کنید";
 const INVALID_ORDER_ID_TEXT = "شماره سفارش وارد شده اشتباه است";
 const ORDER_PHONE_PROMPT = "شماره موبایلی که با آن سفارش را ثبت کردید وارد کنید.";
@@ -73,10 +75,10 @@ function normalizeIranianMobile(value) {
 
 function mainMenu() {
   return {
-    keyboard: [[{ text: ORDER_BUTTON_TEXT }]],
-    resize_keyboard: true,
-    is_persistent: true,
-    input_field_placeholder: "یکی از گزینه‌ها را انتخاب کنید",
+    inline_keyboard: [[
+      { text: ORDER_BUTTON_TEXT, callback_data: "order" },
+      { text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL },
+    ]],
   };
 }
 
@@ -412,11 +414,23 @@ async function handleMessage(message, env, fetchImpl) {
 }
 
 async function handleCallback(query, env, fetchImpl) {
+  const chatId = query.message?.chat?.id;
+  const messageId = query.message?.message_id;
+
+  if (query.data === "order" && query.message?.chat?.type === "private" && chatId) {
+    await telegram(
+      "answerCallbackQuery",
+      { callback_query_id: query.id },
+      env,
+      fetchImpl,
+    );
+    await requestOrderId(chatId, env, fetchImpl);
+    return;
+  }
+
   if (!isAdmin(query.from?.id, env)) return;
 
   const [action, productId] = String(query.data || "").split(":", 2);
-  const chatId = query.message?.chat?.id;
-  const messageId = query.message?.message_id;
   if (!chatId || !messageId || !validProductId(productId)) return;
 
   await telegram(
