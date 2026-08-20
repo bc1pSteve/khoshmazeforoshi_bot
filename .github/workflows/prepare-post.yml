@@ -1,20 +1,23 @@
-name: Post to Telegram and Bale
+name: Prepare product confirmation
 
 on:
-  workflow_dispatch:      # Manual trigger only -- run it from the Actions tab whenever you want to post
+  workflow_dispatch:
     inputs:
-      product_id:
-        description: "Product ID to post, or random"
+      requested_product_id:
+        description: "Product ID or random"
         required: true
       request_chat_id:
-        description: "Telegram request chat ID (leave blank for manual runs)"
+        description: "Telegram admin chat ID"
+        required: true
+      exclude_product_id:
+        description: "Product ID to exclude when choosing another random product"
         required: false
 
 permissions:
   contents: read
 
 jobs:
-  post:
+  prepare:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -33,18 +36,15 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > service_account.json
 
-      - name: Run auto-poster
+      - name: Select product and request confirmation
         env:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_FILE: service_account.json
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           TELEGRAM_REQUEST_CHAT_ID: ${{ github.event.inputs.request_chat_id }}
-          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
-          BALE_CHANNEL_ID: ${{ secrets.BALE_CHANNEL_ID }}
-          PRODUCT_ID: ${{ github.event.inputs.product_id }}
-        run: python main.py
+          REQUESTED_PRODUCT_ID: ${{ github.event.inputs.requested_product_id }}
+          EXCLUDE_PRODUCT_ID: ${{ github.event.inputs.exclude_product_id }}
+        run: python prepare_post.py
 
       - name: Clean up service account file
         if: always()

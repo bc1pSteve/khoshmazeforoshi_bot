@@ -36,6 +36,7 @@ const env = {
   GITHUB_OWNER: "bc1pSteve",
   GITHUB_REPO: "khoshmazeforoshi_bot",
   GITHUB_WORKFLOW: "post.yml",
+  GITHUB_PREPARE_WORKFLOW: "prepare-post.yml",
   GITHUB_REF: "main",
   WOOCOMMERCE_BASE_URL: "https://shop.example",
   WOOCOMMERCE_CONSUMER_KEY: "ck_read_only",
@@ -479,10 +480,11 @@ test("ignores public order lookup in group chats", async () => {
   assert.equal(calls, 0);
 });
 
-test("shows confirmation buttons for an admin post command", async () => {
+test("admin post command dispatches title preparation workflow", async () => {
   const calls = [];
   const fetchMock = async (url, options) => {
     calls.push({ url, options });
+    if (url.includes("api.github.com")) return new Response(null, { status: 204 });
     return telegramSuccess();
   };
 
@@ -499,9 +501,50 @@ test("shows confirmation buttons for an admin post command", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.equal(calls.length, 1);
-  const body = JSON.parse(calls[0].options.body);
-  assert.equal(body.reply_markup.inline_keyboard[0][0].callback_data, "post:P001");
+  const statusMessage = calls.find((call) => call.url.includes("/sendMessage"));
+  assert.equal(JSON.parse(statusMessage.options.body).text, "در حال خواندن عنوان محصول…");
+  const githubCall = calls.find((call) => call.url.includes("api.github.com"));
+  assert.match(githubCall.url, /prepare-post\.yml\/dispatches$/);
+  const body = JSON.parse(githubCall.options.body);
+  assert.deepEqual(body.inputs, {
+    requested_product_id: "P001",
+    request_chat_id: "42",
+    exclude_product_id: "",
+  });
+});
+
+test("admin /post random dispatches random unposted product preparation", async () => {
+  const calls = [];
+  const fetchMock = async (url, options) => {
+    calls.push({ url, options });
+    if (url.includes("api.github.com")) return new Response(null, { status: 204 });
+    return telegramSuccess();
+  };
+
+  await handleRequest(
+    webhookRequest({
+      message: {
+        text: "/post random",
+        from: { id: 42 },
+        chat: { id: 42, type: "private" },
+      },
+    }),
+    env,
+    fetchMock,
+  );
+
+  const statusMessage = calls.find((call) => call.url.includes("/sendMessage"));
+  assert.equal(
+    JSON.parse(statusMessage.options.body).text,
+    "در حال انتخاب یک محصول منتشرنشده…",
+  );
+  const githubCall = calls.find((call) => call.url.includes("api.github.com"));
+  assert.match(githubCall.url, /prepare-post\.yml\/dispatches$/);
+  assert.deepEqual(JSON.parse(githubCall.options.body).inputs, {
+    requested_product_id: "random",
+    request_chat_id: "42",
+    exclude_product_id: "",
+  });
 });
 
 test("confirmed callback dispatches GitHub workflow with product and chat IDs", async () => {
@@ -532,6 +575,45 @@ test("confirmed callback dispatches GitHub workflow with product and chat IDs", 
   assert.deepEqual(body.inputs, { product_id: "P001", request_chat_id: "42" });
   const editedMessage = calls.find((call) => call.url.includes("/editMessageText"));
   assert.ok(editedMessage);
+  assert.equal(
+    JSON.parse(editedMessage.options.body).text,
+    "درخواست ارسال ثبت شد. نتیجه همین‌جا اعلام می‌شود.",
+  );
+});
+
+test("choose another product excludes the current product and prepares a new random one", async () => {
+  const calls = [];
+  const fetchMock = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url.includes("api.github.com")) return new Response(null, { status: 204 });
+    return telegramSuccess();
+  };
+
+  await handleRequest(
+    webhookRequest({
+      callback_query: {
+        id: "callback-reroll",
+        data: "reroll:P001",
+        from: { id: 42 },
+        message: { message_id: 7, chat: { id: 42, type: "private" } },
+      },
+    }),
+    env,
+    fetchMock,
+  );
+
+  const githubCall = calls.find((call) => call.url.includes("api.github.com"));
+  assert.match(githubCall.url, /prepare-post\.yml\/dispatches$/);
+  assert.deepEqual(JSON.parse(githubCall.options.body).inputs, {
+    requested_product_id: "random",
+    request_chat_id: "42",
+    exclude_product_id: "P001",
+  });
+  const editedMessage = calls.find((call) => call.url.includes("/editMessageText"));
+  assert.equal(
+    JSON.parse(editedMessage.options.body).text,
+    "در حال انتخاب محصول دیگری…",
+  );
 });
 
 test("rejects a Bale webhook with the wrong path secret", async () => {

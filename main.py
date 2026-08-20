@@ -51,8 +51,16 @@ def run() -> None:
             "command-line argument locally: `python main.py P001`)."
         )
 
-    print(f"Manual mode: posting product_id={product_id}")
-    row = sheets.get_row_by_product_id(product_id)
+    random_mode = product_id.lower() == "random"
+    if random_mode:
+        print("Random mode: selecting an unposted product")
+        row = sheets.get_random_unposted_row()
+        if row is None:
+            raise ValueError("No unposted product is available in the sheet.")
+        product_id = row["product_id"]
+    else:
+        print(f"Manual mode: posting product_id={product_id}")
+        row = sheets.get_row_by_product_id(product_id)
     status = row["status"].strip().lower()
     if status == "posted":
         print(f"product_id={product_id} was already posted on {row.get('posted_at', '')}. "
@@ -80,7 +88,7 @@ def run() -> None:
             TELEGRAM_BOT_TOKEN, TELEGRAM_NOTIFICATION_CHAT_ID
         )
         notification_client.send_message(
-            f"✅ محصول {product_id} با موفقیت به تلگرام و بله ارسال شد."
+            f"✅ محصول «{row['title']}» با موفقیت به تلگرام و بله ارسال شد."
         )
 
 

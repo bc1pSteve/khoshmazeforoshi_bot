@@ -16,6 +16,7 @@ Expected sheet columns (edit COLUMN_MAP below if your sheet differs):
 
 from __future__ import annotations
 import datetime
+import secrets
 from typing import Optional, TypedDict
 
 from google.oauth2 import service_account
@@ -82,13 +83,28 @@ class SheetsClient:
 
     def get_next_unposted_row(self) -> Optional[Row]:
         """Return the first row whose status column is empty (not yet posted)."""
-        values = self._get_all_rows()
-        for i, row in enumerate(values):
-            status = row[COLUMN_MAP["status"]] if len(row) > COLUMN_MAP["status"] else ""
-            if status.strip().lower() != "posted":
-                # +2 because range starts at row 2 and sheets are 1-indexed
-                return self._row_to_dict(i + 2, row)
-        return None
+        rows = self.get_unposted_rows()
+        return rows[0] if rows else None
+
+    def get_unposted_rows(self, exclude_product_id: str = "") -> list[Row]:
+        """Return valid rows that have never reached either posting checkpoint."""
+        excluded = exclude_product_id.strip()
+        candidates: list[Row] = []
+        for i, raw_row in enumerate(self._get_all_rows()):
+            row = self._row_to_dict(i + 2, raw_row)
+            if row["status"].strip():
+                continue
+            if excluded and row["product_id"].strip() == excluded:
+                continue
+            if not all(row[field].strip() for field in ("product_id", "drive_file_id", "title")):
+                continue
+            candidates.append(row)
+        return candidates
+
+    def get_random_unposted_row(self, exclude_product_id: str = "") -> Optional[Row]:
+        """Choose one never-posted product, optionally excluding the current choice."""
+        candidates = self.get_unposted_rows(exclude_product_id)
+        return secrets.choice(candidates) if candidates else None
 
     def get_row_by_product_id(self, product_id: str) -> Optional[Row]:
         """Return the row matching the given product_id, regardless of status.
