@@ -241,8 +241,8 @@ async function sendBaleMainMenuMessage(chatId, text, env, fetchImpl) {
   );
 }
 
-async function dispatchWorkflow(productId, chatId, env, fetchImpl) {
-  const workflow = encodeURIComponent(env.GITHUB_WORKFLOW || "post.yml");
+async function dispatchGithubWorkflow(workflowName, inputs, env, fetchImpl) {
+  const workflow = encodeURIComponent(workflowName);
   const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${workflow}/dispatches`;
   const response = await fetchImpl(url, {
     method: "POST",
@@ -255,10 +255,7 @@ async function dispatchWorkflow(productId, chatId, env, fetchImpl) {
     },
     body: JSON.stringify({
       ref: env.GITHUB_REF || "main",
-      inputs: {
-        product_id: productId,
-        request_chat_id: String(chatId),
-      },
+      inputs,
     }),
   });
 
@@ -266,6 +263,37 @@ async function dispatchWorkflow(productId, chatId, env, fetchImpl) {
     const details = await response.text();
     throw new Error(`GitHub dispatch failed (${response.status}): ${details.slice(0, 200)}`);
   }
+}
+
+async function dispatchWorkflow(productId, chatId, env, fetchImpl) {
+  await dispatchGithubWorkflow(
+    env.GITHUB_WORKFLOW || "post.yml",
+    {
+      product_id: productId,
+      request_chat_id: String(chatId),
+    },
+    env,
+    fetchImpl,
+  );
+}
+
+async function dispatchPrepareWorkflow(
+  requestedProductId,
+  chatId,
+  excludeProductId,
+  env,
+  fetchImpl,
+) {
+  await dispatchGithubWorkflow(
+    env.GITHUB_PREPARE_WORKFLOW || "prepare-post.yml",
+    {
+      requested_product_id: requestedProductId,
+      request_chat_id: String(chatId),
+      exclude_product_id: excludeProductId || "",
+    },
+    env,
+    fetchImpl,
+  );
 }
 
 async function getLastRun(env, fetchImpl) {
@@ -566,6 +594,7 @@ async function handleMessage(message, env, fetchImpl) {
         "",
         "فرمان‌های مدیریت:",
         "/post PRODUCT_ID — آماده‌سازی ارسال محصول",
+        "/post random — انتخاب تصادفی محصول منتشرنشده",
         "/last — وضعیت آخرین اجرا",
       );
     }
@@ -602,11 +631,14 @@ async function handleMessage(message, env, fetchImpl) {
 
   if (command === "/post") {
     if (!admin) return;
-    const productId = pieces[0];
-    if (!validProductId(productId)) {
+    const rawProductId = pieces[0];
+    const requestedProductId = rawProductId?.toLowerCase() === "random"
+      ? "random"
+      : rawProductId;
+    if (!validProductId(requestedProductId)) {
       await telegram(
         "sendMessage",
-        { chat_id: chatId, text: "فرمت درست: /post P001" },
+        { chat_id: chatId, text: "فرمت درست: /post P001 یا /post random" },
         env,
         fetchImpl,
       );
@@ -617,17 +649,14 @@ async function handleMessage(message, env, fetchImpl) {
       "sendMessage",
       {
         chat_id: chatId,
-        text: `محصول ${productId} به تلگرام و بله ارسال شود؟`,
-        reply_markup: {
-          inline_keyboard: [[
-            { text: "✅ تأیید ارسال", callback_data: `post:${productId}` },
-            { text: "❌ لغو", callback_data: `cancel:${productId}` },
-          ]],
-        },
+        text: requestedProductId === "random"
+          ? "در حال انتخاب یک محصول منتشرنشده…"
+          : "در حال خواندن عنوان محصول…",
       },
       env,
       fetchImpl,
     );
+    await dispatchPrepareWorkflow(requestedProductId, chatId, "", env, fetchImpl);
     return;
   }
 
@@ -679,10 +708,21 @@ async function handleCallback(query, env, fetchImpl) {
   if (action === "cancel") {
     await telegram(
       "editMessageText",
-      { chat_id: chatId, message_id: messageId, text: `ارسال ${productId} لغو شد.` },
+      { chat_id: chatId, message_id: messageId, text: "ارسال محصول لغو شد." },
       env,
       fetchImpl,
     );
+    return;
+  }
+
+  if (action === "reroll") {
+    await telegram(
+      "editMessageText",
+      { chat_id: chatId, message_id: messageId, text: "در حال انتخاب محصول دیگری…" },
+      env,
+      fetchImpl,
+    );
+    await dispatchPrepareWorkflow("random", chatId, productId, env, fetchImpl);
     return;
   }
 
@@ -694,7 +734,7 @@ async function handleCallback(query, env, fetchImpl) {
     {
       chat_id: chatId,
       message_id: messageId,
-      text: `درخواست ارسال ${productId} ثبت شد. نتیجه همین‌جا اعلام می‌شود.`,
+      text: "درخواست ارسال ثبت شد. نتیجه همین‌جا اعلام می‌شود.",
     },
     env,
     fetchImpl,

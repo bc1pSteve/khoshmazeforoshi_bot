@@ -4,6 +4,7 @@ No external Telegram library needed -- plain HTTP is enough for this use case.
 """
 
 from __future__ import annotations
+import json
 import requests
 
 
@@ -35,11 +36,14 @@ class TelegramClient:
         )
         return self._validated_json(response)
 
-    def send_message(self, text: str) -> dict:
+    def send_message(self, text: str, reply_markup: dict | None = None) -> dict:
         """Used for error notifications to yourself / an admin chat."""
+        data = {"chat_id": self.channel_id, "text": text}
+        if reply_markup is not None:
+            data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
         response = requests.post(
             f"{self.base_url}/sendMessage",
-            data={"chat_id": self.channel_id, "text": text},
+            data=data,
             timeout=30,
         )
         return self._validated_json(response)
